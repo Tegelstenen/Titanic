@@ -1,0 +1,121 @@
+---
+title: "Titanic - Machine Learning from Disaster"
+author: "Filip Wilhelm Sjöstrand"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+
+# Introduction
+
+We are tasked with creating a prediction model on “what sorts of people were more likely to survive"? We shall create a logistic regression model with `Survived` as response variable. With this model, we will apply a test data set to see its predictions.
+
+# Tidying
+
+```{r, echo=F, message=F}
+# Libraries ----------
+library(dplyr)
+library(ggcorrplot)
+library(ggplot2)
+library(tidyr)
+```
+
+```{r echo=F}
+# Getting data ----------
+train <- data.frame(read.csv('Data/train.csv',header=T, na.strings=c("")))
+test <- data.frame(read.csv('Data/test.csv',header=T, na.strings=c("")))
+```
+
+We observe large missing values for `Cabin`, thus being dropped. Other insignificant values dropped are `PassengerId` since it is only an index, `Name`/`Ticket` since it is difficult to categorize, and the very few NAs in `Embarked`.
+
+```{r}
+# NA analysis ---------
+train %>% visdat::vis_miss()
+test %>% visdat::vis_miss()
+
+train <- train %>%
+    select(-PassengerId, -Cabin, -Name, -Ticket) %>%
+    filter(!is.na(Embarked))
+
+test <- test %>%
+    select(-Cabin, -Name, -Ticket) %>%
+    filter(!is.na(Embarked))
+```
+
+Given `Age`'s approximately normal distribution, I am going to assume no systematic missing NA and replace missing values with the average.
+
+```{r}
+train %>% ggplot() + geom_histogram(aes(Age))
+
+train <- train %>% 
+    mutate(Age = replace_na(Age, mean(train$Age,na.rm=T)))
+
+test <- test %>% 
+    mutate(Age = replace_na(Age, mean(test$Age,na.rm=T)))
+```
+
+We need to ensure every data type is correct. We can observe that `Survived`, `Pclass`, `Sex`, and `Embarked` are not factors—hence transformed.
+
+```{r}
+sapply(train, is.factor)
+
+train <- train %>% 
+    mutate(across(c(Survived, Pclass, Sex, Embarked), as.factor))
+
+test <- test %>% 
+    mutate(across(c(Pclass, Sex, Embarked), as.factor))
+```
+
+A last check on the summary values indicates nothing out of the ordinary.
+
+```{r}
+summary(train)
+```
+
+
+# Model Fitting
+
+From first including every predictor, we observed that `Parch`, `Fare`, and `Embarked` were insignificant.
+
+```{r}
+model <- glm(
+    Survived ~ Pclass + Sex + SibSp + Age,
+    family = binomial(link = 'logit'),
+    data = train
+    )
+
+summary(model)
+```
+
+## Diagnostics
+
+Relatively high McFadden’s $R^2$
+
+```{r}
+pscl::pR2(model)["McFadden"]
+```
+
+No high VIF
+
+```{r}
+car::vif(model)
+```
+
+# Prediction
+
+```{r}
+preds <- predict(model, test, type="response")
+
+test$prob <-  preds
+
+result <- test %>%
+    mutate(Survived = case_when(prob < .5 ~ 0, prob >= .5 ~ 1)) %>% 
+    mutate(Survived = as.factor(Survived)) %>% 
+    select(PassengerId, Survived)
+
+path = "/Users/filipsjostrand/Documents/GitHub/Titanic/Data/Datasubmission.csv"
+write.csv(result, path, row.names=FALSE)
+```
+
+
